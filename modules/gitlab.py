@@ -8,20 +8,23 @@ Module for handling gitlab calls.
 
         gitlab.user: admin
         gitlab.password: verybadpass
-
-        gitlab.url: 'http://gitlab.domain.com/'
+        gitlab.url: 'https://gitlab.domain.com/'
 
         OR (for API based authentication)
 
-        gitlab.api: 'ADMIN'
-        gitlab.url: 'http://gitlab.domain.com'
+        gitlab.user: admin
+        gitlab.api: '432432432432432'
+        gitlab.url: 'https://gitlab.domain.com'
 
 '''
+
+import site
+
+site.addsitedir('/usr/local/lib/python2.7/dist-packages')
 
 # Import third party libs
 HAS_GITLAB = False
 try:
-    import gitlab
     HAS_GITLAB = True
 except ImportError:
     pass
@@ -39,17 +42,16 @@ def __virtual__():
 __opts__ = {}
 
 
-def auth(profile=None, **connection_args):
+def auth(**connection_args):
     '''
     Set up gitlab credentials
 
     Only intended to be used within Gitlab-enabled modules
     '''
 
-    if profile:
-        prefix = profile + ":gitlab."
-    else:
-        prefix = "gitlab."
+    from gitlab import Gitlab
+    
+    prefix = "gitlab."
 
     # look in connection_args first, then default to config file
     def get(key, default=None):
@@ -58,28 +60,16 @@ def auth(profile=None, **connection_args):
 
     user = get('user', 'admin')
     password = get('password', 'ADMIN')
-    tenant = get('tenant', 'admin')
-    tenant_id = get('tenant_id')
-    auth_url = get('auth_url', 'http://127.0.0.1:35357/v2.0/')
-    insecure = get('insecure', False)
     token = get('token')
-    endpoint = get('endpoint', 'http://127.0.0.1:35357/v2.0')
+    url = get('url', 'https://localhost/')
 
     if token:
-        kwargs = {'token': token,
-                  'endpoint': endpoint}
+        git = Gitlab(url, token=token)
     else:
-        kwargs = {'username': user,
-                  'password': password,
-                  'tenant_name': tenant,
-                  'tenant_id': tenant_id,
-                  'auth_url': auth_url}
-        # 'insecure' keyword not supported by all v2.0 gitlab clients
-        #   this ensures it's only passed in when defined
-        if insecure:
-            kwargs['insecure'] = True
+        git = Gitlab(url)
+        git.login(user, password)
 
-    return client.Client(**kwargs)
+    return git
 
 
 def ec2_credentials_create(user_id=None, name=None,
@@ -97,7 +87,7 @@ def ec2_credentials_create(user_id=None, name=None,
             user_id=c965f79c4f864eaaa9c3b41904e67082 \
             tenant_id=722787eb540849158668370dc627ec5f
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
 
     if name:
         user_id = user_get(name=name, profile=profile,
@@ -111,7 +101,7 @@ def ec2_credentials_create(user_id=None, name=None,
     if not tenant_id:
         return {'Error': 'Could not resolve Tenant ID'}
 
-    newec2 = kstone.ec2.create(user_id, tenant_id)
+    newec2 = git.ec2.create(user_id, tenant_id)
     return {'access': newec2.access,
             'secret': newec2.secret,
             'tenant_id': newec2.tenant_id,
@@ -133,13 +123,13 @@ def ec2_credentials_delete(user_id=None, name=None, access_key=None,
         salt '*' gitlab.ec2_credentials_delete name=admin \
             access_key=5f66d2f24f604b8bb9cd28886106f442
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
 
     if name:
         user_id = user_get(name=name, profile=None, **connection_args)[name]['id']
     if not user_id:
         return {'Error': 'Could not resolve User ID'}
-    kstone.ec2.delete(user_id, access_key)
+    git.ec2.delete(user_id, access_key)
     return 'ec2 key "{0}" deleted under user id "{1}"'.format(access_key,
                                                               user_id)
 
@@ -157,10 +147,10 @@ def ec2_credentials_get(user_id=None, name=None, access=None,
         salt '*' gitlab.ec2_credentials_get user_id=c965f79c4f864eaaa9c3b41904e67082 access=722787eb540849158668370dc627ec5f
         salt '*' gitlab.ec2_credentials_get name=nova access=722787eb540849158668370dc627ec5f
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
@@ -168,7 +158,7 @@ def ec2_credentials_get(user_id=None, name=None, access=None,
         return {'Error': 'Unable to resolve user id'}
     if not access:
         return {'Error': 'Access key is required'}
-    ec2_credentials = kstone.ec2.get(user_id=user_id, access=access,
+    ec2_credentials = git.ec2.get(user_id=user_id, access=access,
                                      profile=profile, **connection_args)
     ret[ec2_credentials.user_id] = {'user_id': ec2_credentials.user_id,
                                     'tenant': ec2_credentials.tenant_id,
@@ -190,16 +180,16 @@ def ec2_credentials_list(user_id=None, name=None, profile=None,
         salt '*' gitlab.ec2_credentials_list user_id=298ce377245c4ec9b70e1c639c89e654
         salt '*' gitlab.ec2_credentials_list name=jack
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
     if not user_id:
         return {'Error': 'Unable to resolve user id'}
-    for ec2_credential in kstone.ec2.list(user_id):
+    for ec2_credential in git.ec2.list(user_id):
         ret[ec2_credential.user_id] = {'user_id': ec2_credential.user_id,
                                        'tenant_id': ec2_credential.tenant_id,
                                        'access': ec2_credential.access,
@@ -217,7 +207,7 @@ def endpoint_get(service, profile=None, **connection_args):
 
         salt '*' gitlab.endpoint_get nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     services = service_list(profile, **connection_args)
     if service not in services:
         return {'Error': 'Could not find the specified service'}
@@ -239,9 +229,9 @@ def endpoint_list(profile=None, **connection_args):
 
         salt '*' gitlab.endpoint_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
-    for endpoint in kstone.endpoints.list():
+    for endpoint in git.endpoints.list():
         ret[endpoint.id] = {'id': endpoint.id,
                             'region': endpoint.region,
                             'adminurl': endpoint.adminurl,
@@ -263,11 +253,11 @@ def endpoint_create(service, publicurl=None, internalurl=None, adminurl=None,
         salt '*' gitlab.endpoint_create nova 'http://public/url'
             'http://internal/url' 'http://adminurl/url' region
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     gitlab_service = service_get(name=service, **connection_args)
     if not gitlab_service or 'Error' in gitlab_service:
         return {'Error': 'Could not find the specified service'}
-    kstone.endpoints.create(region=region,
+    git.endpoints.create(region=region,
                             service_id=gitlab_service[service]['id'],
                             publicurl=publicurl,
                             adminurl=adminurl,
@@ -285,11 +275,11 @@ def endpoint_delete(service, profile=None, **connection_args):
 
         salt '*' gitlab.endpoint_delete nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     endpoint = endpoint_get(service, profile, **connection_args)
     if not endpoint or 'Error' in endpoint:
         return {'Error': 'Could not find any endpoints for the service'}
-    kstone.endpoints.delete(endpoint['id'])
+    git.endpoints.delete(endpoint['id'])
     endpoint = endpoint_get(service, profile, **connection_args)
     if not endpoint or 'Error' in endpoint:
         return True
@@ -304,10 +294,10 @@ def role_create(name, profile=None, **connection_args):
         salt '*' gitlab.role_create admin
     '''
 
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if 'Error' not in role_get(name=name, profile=profile, **connection_args):
         return {'Error': 'Role "{0}" already exists'.format(name)}
-    role = kstone.roles.create(name)
+    role = git.roles.create(name)
     return role_get(name=name, profile=profile, **connection_args)
 
 
@@ -324,17 +314,17 @@ def role_delete(role_id=None, name=None, profile=None,
         salt '*' gitlab.role_delete role_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.role_delete name=admin
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
 
     if name:
-        for role in kstone.roles.list():
+        for role in git.roles.list():
             if role.name == name:
                 role_id = role.id
                 break
     if not role_id:
         return {'Error': 'Unable to resolve role id'}
     role = role_get(role_id, profile=profile, **connection_args)
-    kstone.roles.delete(role)
+    git.roles.delete(role)
     ret = 'Role ID {0} deleted'.format(role_id)
     if name:
         ret += ' ({0})'.format(name)
@@ -353,16 +343,16 @@ def role_get(role_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.role_get role_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.role_get name=nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for role in kstone.roles.list():
+        for role in git.roles.list():
             if role.name == name:
                 role_id = role.id
                 break
     if not role_id:
         return {'Error': 'Unable to resolve role id'}
-    role = kstone.roles.get(role_id)
+    role = git.roles.get(role_id)
     ret[role.name] = {'id': role.id,
                       'name': role.name}
     return ret
@@ -378,9 +368,9 @@ def role_list(profile=None, **connection_args):
 
         salt '*' gitlab.role_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
-    for role in kstone.roles.list():
+    for role in git.roles.list():
         ret[role.name] = {'id': role.id,
                           'name': role.name}
     return ret
@@ -398,8 +388,8 @@ def service_create(name, service_type, description=None, profile=None,
         salt '*' gitlab.service_create nova compute \
                 'OpenStack Compute Service'
     '''
-    kstone = auth(profile, **connection_args)
-    service = kstone.services.create(name, service_type, description)
+    git = auth(**connection_args)
+    service = git.services.create(name, service_type, description)
     return service_get(service.id, profile=profile, **connection_args)
 
 
@@ -414,11 +404,11 @@ def service_delete(service_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.service_delete c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.service_delete name=nova
     '''
-    kstone = auth(profile)
+    git = auth(profile)
     if name:
         service_id = service_get(name=name, profile=profile,
                                  **connection_args)[name]['id']
-    service = kstone.services.delete(service_id)
+    service = git.services.delete(service_id)
     return 'Keystone service ID "{0}" deleted'.format(service_id)
 
 
@@ -434,16 +424,16 @@ def service_get(service_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.service_get service_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.service_get name=nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for service in kstone.services.list():
+        for service in git.services.list():
             if service.name == name:
                 service_id = service.id
                 break
     if not service_id:
         return {'Error': 'Unable to resolve service id'}
-    service = kstone.services.get(service_id)
+    service = git.services.get(service_id)
     ret[service.name] = {'id': service.id,
                          'name': service.name,
                          'type': service.type,
@@ -461,9 +451,9 @@ def service_list(profile=None, **connection_args):
 
         salt '*' gitlab.service_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
-    for service in kstone.services.list():
+    for service in git.services.list():
         ret[service.name] = {'id': service.id,
                              'name': service.name,
                              'description': service.description,
@@ -483,8 +473,8 @@ def tenant_create(name, description=None, enabled=True, profile=None,
         salt '*' gitlab.tenant_create nova description='nova tenant'
         salt '*' gitlab.tenant_create test enabled=False
     '''
-    kstone = auth(profile, **connection_args)
-    new = kstone.tenants.create(name, description, enabled)
+    git = auth(**connection_args)
+    new = git.tenants.create(name, description, enabled)
     return tenant_get(new.id, profile=profile, **connection_args)
 
 
@@ -500,15 +490,15 @@ def tenant_delete(tenant_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.tenant_delete tenant_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.tenant_delete name=demo
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if name:
-        for tenant in kstone.tenants.list():
+        for tenant in git.tenants.list():
             if tenant.name == name:
                 tenant_id = tenant.id
                 break
     if not tenant_id:
         return {'Error': 'Unable to resolve tenant id'}
-    kstone.tenants.delete(tenant_id)
+    git.tenants.delete(tenant_id)
     ret = 'Tenant ID {0} deleted'.format(tenant_id)
     if name:
 
@@ -529,16 +519,16 @@ def tenant_get(tenant_id=None, name=None, profile=None,
         salt '*' gitlab.tenant_get tenant_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.tenant_get name=nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for tenant in kstone.tenants.list():
+        for tenant in git.tenants.list():
             if tenant.name == name:
                 tenant_id = tenant.id
                 break
     if not tenant_id:
         return {'Error': 'Unable to resolve tenant id'}
-    tenant = kstone.tenants.get(tenant_id)
+    tenant = git.tenants.get(tenant_id)
     ret[tenant.name] = {'id': tenant.id,
                         'name': tenant.name,
                         'description': tenant.description,
@@ -546,28 +536,25 @@ def tenant_get(tenant_id=None, name=None, profile=None,
     return ret
 
 
-def tenant_list(profile=None, **connection_args):
+def project_list(**connection_args):
     '''
-    Return a list of available tenants (gitlab tenants-list)
+    Return a list of available projects
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' gitlab.tenant_list
+        salt '*' gitlab.project_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
-    for tenant in kstone.tenants.list():
-        ret[tenant.name] = {'id': tenant.id,
-                            'name': tenant.name,
-                            'description': tenant.description,
-                            'enabled': tenant.enabled}
+    for project in git.getprojects():
+        ret[project.name] = project
     return ret
 
 
-def tenant_update(tenant_id=None, name=None, email=None,
-                  enabled=None, profile=None, **connection_args):
+def project_update(project_id=None, name=None, email=None,
+                  enabled=None, **connection_args):
     '''
     Update a tenant's information (gitlab tenant-update)
     The following fields may be updated: name, email, enabled.
@@ -580,23 +567,23 @@ def tenant_update(tenant_id=None, name=None, email=None,
         salt '*' gitlab.tenant_update name=admin enabled=True
         salt '*' gitlab.tenant_update c965f79c4f864eaaa9c3b41904e67082 name=admin email=admin@domain.com
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if not tenant_id:
-        for tenant in kstone.tenants.list():
+        for tenant in git.tenants.list():
             if tenant.name == name:
                 tenant_id = tenant.id
                 break
     if not tenant_id:
         return {'Error': 'Unable to resolve tenant id'}
 
-    tenant = kstone.tenants.get(tenant_id)
+    tenant = git.tenants.get(tenant_id)
     if not name:
         name = tenant.name
     if not email:
         email = tenant.email
     if enabled is None:
         enabled = tenant.enabled
-    kstone.tenants.update(tenant_id, name, email, enabled)
+    git.tenants.update(tenant_id, name, email, enabled)
 
 
 def token_get(profile=None, **connection_args):
@@ -609,8 +596,8 @@ def token_get(profile=None, **connection_args):
 
         salt '*' gitlab.token_get c965f79c4f864eaaa9c3b41904e67082
     '''
-    kstone = auth(profile, **connection_args)
-    token = kstone.service_catalog.get_token()
+    git = auth(**connection_args)
+    token = git.service_catalog.get_token()
     return {'id': token['id'],
             'expires': token['expires'],
             'user_id': token['user_id'],
@@ -627,9 +614,9 @@ def user_list(profile=None, **connection_args):
 
         salt '*' gitlab.user_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
-    for user in kstone.users.list():
+    for user in git.users.list():
         ret[user.name] = {'id': user.id,
                           'name': user.name,
                           'email': user.email,
@@ -652,16 +639,16 @@ def user_get(user_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.user_get user_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.user_get name=nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
     if not user_id:
         return {'Error': 'Unable to resolve user id'}
-    user = kstone.users.get(user_id)
+    user = git.users.get(user_id)
     ret[user.name] = {'id': user.id,
                       'name': user.name,
                       'email': user.email,
@@ -683,8 +670,8 @@ def user_create(name, password, email, tenant_id=None,
 
         salt '*' gitlab.user_create name=jack password=zero email=jack@halloweentown.org tenant_id=a28a7b5a999a455f84b1f5210264375e enabled=True
     '''
-    kstone = auth(profile, **connection_args)
-    item = kstone.users.create(name=name,
+    git = auth(**connection_args)
+    item = git.users.create(name=name,
                                password=password,
                                email=email,
                                tenant_id=tenant_id,
@@ -704,15 +691,15 @@ def user_delete(user_id=None, name=None, profile=None, **connection_args):
         salt '*' gitlab.user_delete user_id=c965f79c4f864eaaa9c3b41904e67082
         salt '*' gitlab.user_delete name=nova
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
     if not user_id:
         return {'Error': 'Unable to resolve user id'}
-    kstone.users.delete(user_id)
+    git.users.delete(user_id)
     ret = 'User ID {0} deleted'.format(user_id)
     if name:
 
@@ -734,15 +721,15 @@ def user_update(user_id=None, name=None, email=None, enabled=None,
         salt '*' gitlab.user_update user_id=c965f79c4f864eaaa9c3b41904e67082 name=newname
         salt '*' gitlab.user_update c965f79c4f864eaaa9c3b41904e67082 name=newname email=newemail@domain.com
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if not user_id:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
         if not user_id:
             return {'Error': 'Unable to resolve user id'}
-    user = kstone.users.get(user_id)
+    user = git.users.get(user_id)
     # Keep previous settings if not updating them
     if not name:
         name = user.name
@@ -750,13 +737,13 @@ def user_update(user_id=None, name=None, email=None, enabled=None,
         email = user.email
     if enabled is None:
         enabled = user.enabled
-    kstone.users.update(user=user_id, name=name, email=email, enabled=enabled)
+    git.users.update(user=user_id, name=name, email=email, enabled=enabled)
     if tenant:
-        for t in kstone.tenants.list():
+        for t in git.tenants.list():
             if t.name == tenant:
                 tenant_id = t.id
                 break
-        kstone.users.update_tenant(user_id, tenant_id)
+        git.users.update_tenant(user_id, tenant_id)
     ret = 'Info updated for user ID {0}'.format(user_id)
     return ret
 
@@ -773,7 +760,7 @@ def user_verify_password(user_id=None, name=None, password=None,
         salt '*' gitlab.user_verify_password name=test password=foobar
         salt '*' gitlab.user_verify_password user_id=c965f79c4f864eaaa9c3b41904e67082 password=foobar
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if 'connection_endpoint' in connection_args:
         auth_url = connection_args.get('connection_endpoint')
     else:
@@ -781,7 +768,7 @@ def user_verify_password(user_id=None, name=None, password=None,
                                          'http://127.0.0.1:35357/v2.0')
 
     if user_id:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.id == user_id:
                 name = user.name
                 break
@@ -810,15 +797,15 @@ def user_password_update(user_id=None, name=None, password=None,
         salt '*' gitlab.user_delete user_id=c965f79c4f864eaaa9c3b41904e67082 password=12345
         salt '*' gitlab.user_delete name=nova password=12345
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == name:
                 user_id = user.id
                 break
     if not user_id:
         return {'Error': 'Unable to resolve user id'}
-    kstone.users.update_password(user=user_id, password=password)
+    git.users.update_password(user=user_id, password=password)
     ret = 'Password updated for user ID {0}'.format(user_id)
     if name:
         ret += ' ({0})'.format(name)
@@ -841,7 +828,7 @@ def user_role_add(user_id=None, user=None, tenant_id=None,
             role_id=ce377245c4ec9b70e1c639c89e8cead4
         salt '*' gitlab.user_role_add user=admin tenant=admin role=admin
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if user:
         user_id = user_get(name=user, profile=profile,
                            **connection_args)[user]['id']
@@ -869,7 +856,7 @@ def user_role_add(user_id=None, user=None, tenant_id=None,
     if not role_id:
         return {'Error': 'Unable to resolve role id'}
 
-    kstone.roles.add_user_role(user_id, role_id, tenant_id)
+    git.roles.add_user_role(user_id, role_id, tenant_id)
     ret_msg = '"{0}" role added for user "{1}" for "{2}" tenant'
     return ret_msg.format(role, user, tenant)
 
@@ -890,7 +877,7 @@ def user_role_remove(user_id=None, user=None, tenant_id=None,
             role_id=ce377245c4ec9b70e1c639c89e8cead4
         salt '*' gitlab.user_role_remove user=admin tenant=admin role=admin
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     if user:
         user_id = user_get(name=user, profile=profile,
                            **connection_args)[user]['id']
@@ -917,7 +904,7 @@ def user_role_remove(user_id=None, user=None, tenant_id=None,
     if not role_id:
         return {'Error': 'Unable to resolve role id'}
 
-    kstone.roles.remove_user_role(user_id, role_id, tenant_id)
+    git.roles.remove_user_role(user_id, role_id, tenant_id)
     ret_msg = '"{0}" role removed for user "{1}" under "{2}" tenant'
     return ret_msg.format(role, user, tenant)
 
@@ -936,21 +923,21 @@ def user_role_list(user_id=None, tenant_id=None, user_name=None,
             tenant_id=7167a092ece84bae8cead4bf9d15bb3b
         salt '*' gitlab.user_role_list user_name=admin tenant_name=admin
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = {}
     if user_name:
-        for user in kstone.users.list():
+        for user in git.users.list():
             if user.name == user_name:
                 user_id = user.id
                 break
     if tenant_name:
-        for tenant in kstone.tenants.list():
+        for tenant in git.tenants.list():
             if tenant.name == tenant_name:
                 tenant_id = tenant.id
                 break
     if not user_id or not tenant_id:
         return {'Error': 'Unable to resolve user or tenant id'}
-    for role in kstone.roles.roles_for_user(user=user_id, tenant=tenant_id):
+    for role in git.roles.roles_for_user(user=user_id, tenant=tenant_id):
         ret[role.name] = {'id': role.id,
                           'name': role.name,
                           'user_id': user_id,
@@ -969,9 +956,9 @@ def _item_list(profile=None, **connection_args):
 
         salt '*' gitlab.item_list
     '''
-    kstone = auth(profile, **connection_args)
+    git = auth(**connection_args)
     ret = []
-    for item in kstone.items.list():
+    for item in git.items.list():
         ret.append(item.__dict__)
         #ret[item.name] = {
         #        'id': item.id,
