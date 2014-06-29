@@ -176,21 +176,31 @@ def hook_delete(hook_url, project_id=None, project_name=None, **connection_args)
     return {'Error': 'Could not find hook for the specified project'}
 
 
-def deploykey_create(name, service_type, description=None, profile=None,
+def deploykey_create(title, key, project_id=None, project_name=None, 
                    **connection_args):
     '''
-    Add deploy to Gitlab project
+    Add deploy key to Gitlab project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.service_create nova compute \
-                'OpenStack Compute Service'
+        salt '*' gitlab.deploykey_create title keyfrsdfdsfds 43
     '''
     git = auth(**connection_args)
-    service = git.services.create(name, service_type, description)
-    return service_get(service.id, profile=profile, **connection_args)
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    create = True
+    for key in git.listdeploykeys(project['id']):
+        if key.get('title') == title:
+            create = False
+    if create:
+        print git.adddeploykey(project['id'], title, key)
+    return deploykey_get(title, project_id=project['id'])
 
 
 def deploykey_delete(key_title, project_id=None, project_name=None, **connection_args):
@@ -217,7 +227,8 @@ def deploykey_delete(key_title, project_id=None, project_name=None, **connection
             return 'Gitlab deploy key ID "{0}" deleted'.format(key['id'])
     return {'Error': 'Could not find deploy key for the specified project'}
 
-def deploykey_get(key_title, project_id=None, project_name=None, **connection_args):
+
+def deploykey_get(title, project_id=None, project_name=None, **connection_args):
     '''
     Return a specific deploy key
 
@@ -236,7 +247,7 @@ def deploykey_get(key_title, project_id=None, project_name=None, **connection_ar
     if not project:
         return {'Error': 'Unable to resolve project'}
     for key in git.listdeploykeys(project.get('id')):
-        if key.get('title') == key_title:
+        if key.get('title') == title:
             return {key.get('title'): key}
     return {'Error': 'Could not find deploy key for the specified project'}
 
@@ -322,15 +333,12 @@ def project_get(project_id=None, name=None, **connection_args):
     '''
     git = auth(**connection_args)
     ret = {}
-
     if name:
         project = _get_project_by_name(git, name)
     else:
         project = _get_project_by_id(git, project_id)
-
     if not project:
         return {'Error': 'Error in retrieving project'}
-
     ret[project.get('name')] = project
     return ret
 
