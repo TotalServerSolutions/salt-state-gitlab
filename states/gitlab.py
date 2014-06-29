@@ -15,13 +15,13 @@ Management of Gitlab projects
           - namespace1/repository2
           - namespace2/repository1
 
-    nova:
+    jenkins:
       gitlab.hook_present:
-        - name: url_of_hook
+        - name: http://url_of_hook
         - project: 'namespace/repository'
 
     some_deploy_key:
-      gitlab.deploy_present:
+      gitlab.deploykey_present:
         - name: title_of_key
         - key: public_key
         - project: 'namespace/repository'
@@ -173,4 +173,37 @@ def deploykey_absent(name, profile=None, **connection_args):
         ret['comment'] = 'Service "{0}" has been deleted'.format(name)
         ret['changes']['Service'] = 'Deleted'
 
+    return ret
+
+
+def hook_present(name, project, **connection_args):
+    '''
+    Ensure hook present in Gitlab project
+
+    name
+        The URL of hook
+
+    project
+        path to project, i.e. namespace/repo-name
+
+    '''
+    ret = {'name': name,
+           'changes': {},
+           'result': True,
+           'comment': 'Hook "{0}" already exists in project {1}'.format(name, project)}
+
+    # Check if key is already present
+    hook = __salt__['gitlab.hook_get'](name,
+                                       project_name=project,
+                                       **connection_args)
+
+    if 'Error' not in hook:
+        return ret
+    else:
+        # Create hook
+        hook = __salt__['gitlab.hook_create'](name,
+                                              project_name=project,
+                                              **connection_args)
+        ret['comment'] = 'Hook "{0}" has been added'.format(name)
+        ret['changes']['Hook'] = 'Created'
     return ret
