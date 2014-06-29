@@ -195,11 +195,11 @@ def deploykey_create(title, key, project_id=None, project_name=None,
     if not project:
         return {'Error': 'Unable to resolve project'}
     create = True
-    for key in git.listdeploykeys(project['id']):
-        if key.get('title') == title:
+    for dkey in git.listdeploykeys(project['id']):
+        if dkey.get('title') == title:
             create = False
     if create:
-        print git.adddeploykey(project['id'], title, key)
+        git.adddeploykey(project['id'], title, key)
     return deploykey_get(title, project_id=project['id'])
 
 

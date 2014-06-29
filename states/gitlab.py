@@ -1,69 +1,30 @@
 # -*- coding: utf-8 -*-
 '''
-Management of Gitlab users
-============================
+Management of Gitlab projects
+==============================
 
-:depends:   - gitlabclient Python module
+:depends:   - pyapi-gitlab Python module
 :configuration: See :py:mod:`salt.modules.gitlab` for setup instructions.
 
 .. code-block:: yaml
 
-    Gitlab tenants:
-      gitlab.tenant_present:
+    Gitlab projects:
+      gitlab.project_present:
         - names:
-          - admin
-          - demo
-          - service
-
-    Gitlab roles:
-      gitlab.role_present:
-        - names:
-          - admin
-          - Member
-
-    admin:
-      gitlab.user_present:
-        - password: R00T_4CC3SS
-        - email: admin@domain.com
-        - roles:
-          - admin:   # tenants
-            - admin  # roles
-          - service:
-            - admin
-            - Member
-        - require:
-          - gitlab: Gitlab tenants
-          - gitlab: Gitlab roles
+          - namespace1/repository1
+          - namespace1/repository2
+          - namespace2/repository1
 
     nova:
-      gitlab.user_present:
-        - password: '$up3rn0v4'
-        - email: nova@domain.com
-        - tenant: service
-        - roles:
-          - service:
-            - admin
-        - require:
-          - gitlab: Gitlab tenants
-          - gitlab: Gitlab roles
+      gitlab.hook_present:
+        - name: url_of_hook
+        - project: 'namespace/repository'
 
-    demo:
-      gitlab.user_present:
-        - password: 'd3m0n$trati0n'
-        - email: demo@domain.com
-        - tenant: demo
-        - roles:
-          - demo:
-            - Member
-        - require:
-          - gitlab: Gitlab tenants
-          - gitlab: Gitlab roles
-
-    nova service:
-      gitlab.service_present:
-        - name: nova
-        - service_type: compute
-        - description: OpenStack Compute Service
+    some_deploy_key:
+      gitlab.deploy_present:
+        - name: title_of_key
+        - key: public_key
+        - project: 'namespace/repository'
 
 '''
 
@@ -75,163 +36,19 @@ def __virtual__():
     return 'gitlab' if 'gitlab.auth' in __salt__ else False
 
 
-def user_present(name,
-                 password,
-                 email,
-                 tenant=None,
-                 enabled=True,
-                 roles=None,
-                 profile=None,
-                 **connection_args):
-    '''
-    Ensure that the gitlab user is present with the specified properties.
-
-    name
-        The name of the user to manage
-
-    password
-        The password to use for this user
-
-    email
-        The email address for this user
-
-    tenant
-        The tenant for this user
-
-    enabled
-        Availability state for this user
-
-    roles
-        The roles the user should have under tenants
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'User "{0}" is already present'.format(name)}
-
-    # Validate tenant if set
-    if tenant is not None:
-        tenantdata = __salt__['gitlab.tenant_get'](name=tenant,
-                                                     profile=profile,
-                                                     **connection_args)
-        if 'Error' in tenantdata:
-            ret['result'] = False
-            ret['comment'] = 'Tenant "{0}" does not exist'.format(tenant)
-            return ret
-        tenant_id = tenantdata[tenant]['id']
-    else:
-        tenant_id = None
-
-    # Check if user is already present
-    user = __salt__['gitlab.user_get'](name=name, profile=profile,
-                                         **connection_args)
-    if 'Error' not in user:
-        if user[name]['email'] != email:
-            __salt__['gitlab.user_update'](name=name, email=email,
-                                             profile=profile, **connection_args)
-            ret['comment'] = 'User "{0}" has been updated'.format(name)
-            ret['changes']['Email'] = 'Updated'
-        if user[name]['enabled'] != enabled:
-            __salt__['gitlab.user_update'](name=name,
-                                             enabled=enabled,
-                                             profile=profile,
-                                             **connection_args)
-            ret['comment'] = 'User "{0}" has been updated'.format(name)
-            ret['changes']['Enabled'] = 'Now {0}'.format(enabled)
-        if tenant and ('tenant_id' not in user[name] or
-                       user[name]['tenant_id'] != tenant_id):
-            __salt__['gitlab.user_update'](name=name, tenant=tenant,
-                                             profile=profile,
-                                             **connection_args)
-            ret['comment'] = 'User "{0}" has been updated'.format(name)
-            ret['changes']['Tenant'] = 'Added to "{0}" tenant'.format(tenant)
-        if not __salt__['gitlab.user_verify_password'](name=name,
-                                                         password=password,
-                                                         profile=profile,
-                                                         **connection_args):
-            __salt__['gitlab.user_password_update'](name=name,
-                                                      password=password,
-                                                      profile=profile,
-                                                      **connection_args)
-            ret['comment'] = 'User "{0}" has been updated'.format(name)
-            ret['changes']['Password'] = 'Updated'
-        if roles:
-            for tenant_role in roles[0].keys():
-                args = dict({'user_name': name, 'tenant_name':
-                             tenant_role, 'profile': profile}, **connection_args)
-                tenant_roles = __salt__['gitlab.user_role_list'](**args)
-                for role in roles[0][tenant_role]:
-                    if role not in tenant_roles:
-                        addargs = dict({'user': name, 'role': role,
-                                        'tenant': tenant_role,
-                                        'profile': profile},
-                                       **connection_args)
-                        newrole = __salt__['gitlab.user_role_add'](**addargs)
-                        if 'roles' in ret['changes']:
-                            ret['changes']['roles'].append(newrole)
-                        else:
-                            ret['changes']['roles'] = [newrole]
-    else:
-        # Create that user!
-        __salt__['gitlab.user_create'](name=name,
-                                         password=password,
-                                         email=email,
-                                         tenant_id=tenant_id,
-                                         enabled=enabled,
-                                         profile=profile,
-                                         **connection_args)
-        if roles:
-            for tenant_role in roles[0].keys():
-                for role in roles[0][tenant_role]:
-                    __salt__['gitlab.user_role_add'](user=name,
-                                                       role=role,
-                                                       tenant=tenant_role,
-                                                       profile=profile,
-                                                       **connection_args)
-        ret['comment'] = 'Gitlab user {0} has been added'.format(name)
-        ret['changes']['User'] = 'Created'
-
-    return ret
-
-
-def user_absent(name, profile=None, **connection_args):
-    '''
-    Ensure that the gitlab user is absent.
-
-    name
-        The name of the user that should not exist
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'User "{0}" is already absent'.format(name)}
-
-    # Check if user is present
-    user = __salt__['gitlab.user_get'](name=name, profile=profile,
-                                         **connection_args)
-    if 'Error' not in user:
-        # Delete that user!
-        __salt__['gitlab.user_delete'](name=name, profile=profile,
-                                         **connection_args)
-        ret['comment'] = 'User "{0}" has been deleted'.format(name)
-        ret['changes']['User'] = 'Deleted'
-
-    return ret
-
-
-def tenant_present(name, description=None, enabled=True, profile=None,
+def project_present(name, description=None, enabled=True, profile=None,
                    **connection_args):
     ''''
-    Ensures that the gitlab tenant exists
+    Ensures that the gitlab project exists
 
     name
-        The name of the tenant to manage
+        The name of the project to manage
 
     description
-        The description to use for this tenant
+        The description to use for this project
 
     enabled
-        Availability state for this tenant
+        Availability state for this project
     '''
     ret = {'name': name,
            'changes': {},
@@ -239,21 +56,21 @@ def tenant_present(name, description=None, enabled=True, profile=None,
            'comment': 'Tenant "{0}" already exists'.format(name)}
 
     # Check if user is already present
-    tenant = __salt__['gitlab.tenant_get'](name=name,
+    project = __salt__['gitlab.project_get'](name=name,
                                              profile=profile,
                                              **connection_args)
 
-    if 'Error' not in tenant:
-        if tenant[name]['description'] != description:
-            __salt__['gitlab.tenant_update'](name, description,
+    if 'Error' not in project:
+        if project[name]['description'] != description:
+            __salt__['gitlab.project_update'](name, description,
                                                enabled,
                                                profile=profile,
                                                **connection_args)
             comment = 'Tenant "{0}" has been updated'.format(name)
             ret['comment'] = comment
             ret['changes']['Description'] = 'Updated'
-        if tenant[name]['enabled'] != enabled:
-            __salt__['gitlab.tenant_update'](name, description,
+        if project[name]['enabled'] != enabled:
+            __salt__['gitlab.project_update'](name, description,
                                                enabled,
                                                profile=profile,
                                                **connection_args)
@@ -261,8 +78,8 @@ def tenant_present(name, description=None, enabled=True, profile=None,
             ret['comment'] = comment
             ret['changes']['Enabled'] = 'Now {0}'.format(enabled)
     else:
-        # Create tenant
-        __salt__['gitlab.tenant_create'](name, description, enabled,
+        # Create project
+        __salt__['gitlab.project_create'](name, description, enabled,
                                            profile=profile,
                                            **connection_args)
         ret['comment'] = 'Tenant "{0}" has been added'.format(name)
@@ -270,25 +87,25 @@ def tenant_present(name, description=None, enabled=True, profile=None,
     return ret
 
 
-def tenant_absent(name, profile=None, **connection_args):
+def project_absent(name, profile=None, **connection_args):
     '''
-    Ensure that the gitlab tenant is absent.
+    Ensure that the gitlab project is absent.
 
     name
-        The name of the tenant that should not exist
+        The name of the project that should not exist
     '''
     ret = {'name': name,
            'changes': {},
            'result': True,
            'comment': 'Tenant "{0}" is already absent'.format(name)}
 
-    # Check if tenant is present
-    tenant = __salt__['gitlab.tenant_get'](name=name,
+    # Check if project is present
+    project = __salt__['gitlab.project_get'](name=name,
                                              profile=profile,
                                              **connection_args)
-    if 'Error' not in tenant:
-        # Delete tenant
-        __salt__['gitlab.tenant_delete'](name=name, profile=profile,
+    if 'Error' not in project:
+        # Delete project
+        __salt__['gitlab.project_delete'](name=name, profile=profile,
                                            **connection_args)
         ret['comment'] = 'Tenant "{0}" has been deleted'.format(name)
         ret['changes']['Tenant'] = 'Deleted'
@@ -296,98 +113,45 @@ def tenant_absent(name, profile=None, **connection_args):
     return ret
 
 
-def role_present(name, profile=None, **connection_args):
-    ''''
-    Ensures that the gitlab role exists
+def deploykey_present(name, key, project, **connection_args):
+    '''
+    Ensure deploy key present in Gitlab project
 
     name
-        The name of the role that should be present
+        The title of the key
+
+    key
+        SSH public key
+
+    project
+        path to project, i.e. namespace/repo-name
+
     '''
     ret = {'name': name,
            'changes': {},
            'result': True,
-           'comment': 'Role "{0}" already exists'.format(name)}
+           'comment': 'Deploy key "{0}" already exists in project {1}'.format(name, project)}
 
-    # Check if role is already present
-    role = __salt__['gitlab.role_get'](name=name, profile=profile,
-                                         **connection_args)
+    # Check if key is already present
+    dkey = __salt__['gitlab.deploykey_get'](name,
+                                           project_name=project,
+                                           **connection_args)
 
-    if 'Error' not in role:
+    if 'Error' not in dkey:
         return ret
     else:
-        # Create role
-        __salt__['gitlab.role_create'](name, profile=profile,
-                                         **connection_args)
-        ret['comment'] = 'Role "{0}" has been added'.format(name)
-        ret['changes']['Role'] = 'Created'
+        # Create deploy key
+        dkey = __salt__['gitlab.deploykey_create'](name, key,
+                                                  project_name=project,
+                                                  **connection_args)
+        ret['comment'] = 'Deploy key "{0}" has been added'.format(name)
+        ret['changes']['Deploykey'] = 'Created'
     return ret
 
 
-def role_absent(name, profile=None, **connection_args):
+def deploykey_absent(name, profile=None, **connection_args):
     '''
-    Ensure that the gitlab role is absent.
-
-    name
-        The name of the role that should not exist
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'Role "{0}" is already absent'.format(name)}
-
-    # Check if role is present
-    role = __salt__['gitlab.role_get'](name=name, profile=profile,
-                                         **connection_args)
-    if 'Error' not in role:
-        # Delete role
-        __salt__['gitlab.role_delete'](name=name, profile=profile,
-                                         **connection_args)
-        ret['comment'] = 'Role "{0}" has been deleted'.format(name)
-        ret['changes']['Role'] = 'Deleted'
-
-    return ret
-
-
-def service_present(name, service_type, description=None,
-                    profile=None, **connection_args):
-    '''
-    Ensure service present in Gitlab catalog
-
-    name
-        The name of the service
-
-    service_type
-        The type of Openstack Service
-
-    description (optional)
-        Description of the service
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'Service "{0}" already exists'.format(name)}
-
-    # Check if service is already present
-    role = __salt__['gitlab.service_get'](name=name,
-                                            profile=profile,
-                                            **connection_args)
-
-    if 'Error' not in role:
-        return ret
-    else:
-        # Create service
-        __salt__['gitlab.service_create'](name, service_type,
-                                            description,
-                                            profile=profile,
-                                            **connection_args)
-        ret['comment'] = 'Service "{0}" has been added'.format(name)
-        ret['changes']['Service'] = 'Created'
-    return ret
-
-
-def service_absent(name, profile=None, **connection_args):
-    '''
-    Ensure that the service doesn't exist in Gitlab catalog
+    Ensure that the deploy key doesn't exist in Gitlab project
 
     name
         The name of the service that should not exist
@@ -409,88 +173,4 @@ def service_absent(name, profile=None, **connection_args):
         ret['comment'] = 'Service "{0}" has been deleted'.format(name)
         ret['changes']['Service'] = 'Deleted'
 
-    return ret
-
-
-def endpoint_present(name,
-                     publicurl=None,
-                     internalurl=None,
-                     adminurl=None,
-                     region='RegionOne', profile=None, **connection_args):
-    '''
-    Ensure the specified endpoints exists for service
-
-    name
-        The Service name
-
-    public url
-        The public url of service endpoint
-
-    internal url
-        The internal url of service endpoint
-
-    admin url
-        The admin url of the service endpoint
-
-    region
-        The region of the endpoint
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'endpoint for service "{0}" already exists'.format(name)}
-    endpoint = __salt__['gitlab.endpoint_get'](name,
-                                                 profile=profile,
-                                                 **connection_args)
-    cur_endpoint = dict(region=region,
-                        publicurl=publicurl,
-                        adminurl=adminurl,
-                        internalurl=internalurl)
-    if endpoint and 'Error' not in endpoint:
-        endpoint.pop('id')
-        endpoint.pop('service_id')
-        if endpoint == cur_endpoint:
-            return ret
-        else:
-            __salt__['gitlab.endpoint_delete'](name,
-                                                 profile=profile,
-                                                 **connection_args)
-            ret['comment'] = 'endpoint for service "{0}" has been updated'.format(name)
-    else:
-        ret['comment'] = 'endpoint for service "{0}" has been added'.format(name)
-    ret['changes'] = __salt__['gitlab.endpoint_create'](
-        name,
-        region=region,
-        publicurl=publicurl,
-        adminurl=adminurl,
-        internalurl=internalurl,
-        profile=profile,
-        **connection_args)
-    return ret
-
-
-def endpoint_absent(name, profile=None, **connection_args):
-    '''
-    Ensure that the endpoint for a service doesn't exist in Gitlab catalog
-
-    name
-        The name of the service whose endpoints should not exist
-    '''
-    ret = {'name': name,
-           'changes': {},
-           'result': True,
-           'comment': 'endpoint for service "{0}" is already absent'.format(name)}
-
-    # Check if service is present
-    endpoint = __salt__['gitlab.endpoint_get'](name,
-                                                 profile=profile,
-                                                 **connection_args)
-    if not endpoint:
-        return ret
-        # Delete service
-    __salt__['gitlab.endpoint_delete'](name,
-                                         profile=profile,
-                                         **connection_args)
-    ret['comment'] = 'endpoint for service "{0}" has been deleted'.format(name)
-    ret['changes']['endpoint'] = 'Deleted'
     return ret
