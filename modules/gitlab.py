@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Module for handling gitlab calls.
+Module for handling Gitlab calls.
 
 :optdepends:    - pyapi-gitlab Python adapter
 :configuration: This module is not usable until the following are specified
@@ -15,16 +15,14 @@ Module for handling gitlab calls.
         gitlab.user: admin
         gitlab.api: '432432432432432'
         gitlab.url: 'https://gitlab.domain.com'
-
 '''
 
-import site
-
-site.addsitedir('/usr/local/lib/python2.7/dist-packages')
+from __future__ import absolute_import
 
 # Import third party libs
 HAS_GITLAB = False
 try:
+    from gitlab import Gitlab
     HAS_GITLAB = True
 except ImportError:
     pass
@@ -42,15 +40,27 @@ def __virtual__():
 __opts__ = {}
 
 
+def _get_project_by_id(git, id):
+    selected_project = git.getproject(id)
+    return selected_project
+
+
+def _get_project_by_name(git, name):
+    selected_project = None
+    for project in git.getprojects():
+        if project.get('path_with_namespace') == name:
+            selected_project = project
+            break
+    return selected_project
+
+
 def auth(**connection_args):
     '''
     Set up gitlab credentials
 
     Only intended to be used within Gitlab-enabled modules
     '''
-
-    from gitlab import Gitlab
-    
+   
     prefix = "gitlab."
 
     # look in connection_args first, then default to config file
@@ -62,142 +72,15 @@ def auth(**connection_args):
     password = get('password', 'ADMIN')
     token = get('token')
     url = get('url', 'https://localhost/')
-
     if token:
         git = Gitlab(url, token=token)
     else:
         git = Gitlab(url)
         git.login(user, password)
-
     return git
 
 
-def ec2_credentials_create(user_id=None, name=None,
-                           tenant_id=None, tenant=None,
-                           profile=None, **connection_args):
-    '''
-    Create EC2-compatibile credentials for user per tenant
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.ec2_credentials_create name=admin tenant=admin
-        salt '*' gitlab.ec2_credentials_create \
-            user_id=c965f79c4f864eaaa9c3b41904e67082 \
-            tenant_id=722787eb540849158668370dc627ec5f
-    '''
-    git = auth(**connection_args)
-
-    if name:
-        user_id = user_get(name=name, profile=profile,
-                           **connection_args)[name]['id']
-    if not user_id:
-        return {'Error': 'Could not resolve User ID'}
-
-    if tenant:
-        tenant_id = tenant_get(name=tenant, profile=profile,
-                               **connection_args)[tenant]['id']
-    if not tenant_id:
-        return {'Error': 'Could not resolve Tenant ID'}
-
-    newec2 = git.ec2.create(user_id, tenant_id)
-    return {'access': newec2.access,
-            'secret': newec2.secret,
-            'tenant_id': newec2.tenant_id,
-            'user_id': newec2.user_id}
-
-
-def ec2_credentials_delete(user_id=None, name=None, access_key=None,
-                           profile=None, **connection_args):
-    '''
-    Delete EC2-compatibile credentials
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.ec2_credentials_delete \
-            860f8c2c38ca4fab989f9bc56a061a64
-            access_key=5f66d2f24f604b8bb9cd28886106f442
-        salt '*' gitlab.ec2_credentials_delete name=admin \
-            access_key=5f66d2f24f604b8bb9cd28886106f442
-    '''
-    git = auth(**connection_args)
-
-    if name:
-        user_id = user_get(name=name, profile=None, **connection_args)[name]['id']
-    if not user_id:
-        return {'Error': 'Could not resolve User ID'}
-    git.ec2.delete(user_id, access_key)
-    return 'ec2 key "{0}" deleted under user id "{1}"'.format(access_key,
-                                                              user_id)
-
-
-def ec2_credentials_get(user_id=None, name=None, access=None,
-                        profile=None, **connection_args):
-    '''
-    Return ec2_credentials for a user (gitlab ec2-credentials-get)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.ec2_credentials_get c965f79c4f864eaaa9c3b41904e67082 access=722787eb540849158668370dc627ec5f
-        salt '*' gitlab.ec2_credentials_get user_id=c965f79c4f864eaaa9c3b41904e67082 access=722787eb540849158668370dc627ec5f
-        salt '*' gitlab.ec2_credentials_get name=nova access=722787eb540849158668370dc627ec5f
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    if name:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-    if not access:
-        return {'Error': 'Access key is required'}
-    ec2_credentials = git.ec2.get(user_id=user_id, access=access,
-                                     profile=profile, **connection_args)
-    ret[ec2_credentials.user_id] = {'user_id': ec2_credentials.user_id,
-                                    'tenant': ec2_credentials.tenant_id,
-                                    'access': ec2_credentials.access,
-                                    'secret': ec2_credentials.secret}
-    return ret
-
-
-def ec2_credentials_list(user_id=None, name=None, profile=None,
-                         **connection_args):
-    '''
-    Return a list of ec2_credentials for a specific user (gitlab ec2-credentials-list)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.ec2_credentials_list 298ce377245c4ec9b70e1c639c89e654
-        salt '*' gitlab.ec2_credentials_list user_id=298ce377245c4ec9b70e1c639c89e654
-        salt '*' gitlab.ec2_credentials_list name=jack
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    if name:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-    for ec2_credential in git.ec2.list(user_id):
-        ret[ec2_credential.user_id] = {'user_id': ec2_credential.user_id,
-                                       'tenant_id': ec2_credential.tenant_id,
-                                       'access': ec2_credential.access,
-                                       'secret': ec2_credential.secret}
-    return ret
-
-
-def endpoint_get(service, profile=None, **connection_args):
+def hook_get(hook_url, project_id=None, project_name=None, **connection_args):
     '''
     Return a specific endpoint (gitlab endpoint-get)
 
@@ -208,178 +91,95 @@ def endpoint_get(service, profile=None, **connection_args):
         salt '*' gitlab.endpoint_get nova
     '''
     git = auth(**connection_args)
-    services = service_list(profile, **connection_args)
-    if service not in services:
-        return {'Error': 'Could not find the specified service'}
-    service_id = services[service]['id']
-    endpoints = endpoint_list(profile, **connection_args)
-    for endpoint in endpoints:
-        if endpoints[endpoint]['service_id'] == service_id:
-            return endpoints[endpoint]
-    return {'Error': 'Could not find endpoint for the specified service'}
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for hook in git.getprojecthooks(project.get('id')):
+        if hook.get('url') == hook_url:
+            return {hook.get('url'): hook}
+    return {'Error': 'Could not find hook for the specified project'}
 
 
-def endpoint_list(profile=None, **connection_args):
+def hook_list(project_id=None, project_name=None, **connection_args):
     '''
-    Return a list of available endpoints (gitlab endpoints-list)
+    Return a list of available hooks for project
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' gitlab.endpoint_list
+        salt '*' gitlab.deploykey_list 341
     '''
     git = auth(**connection_args)
     ret = {}
-    for endpoint in git.endpoints.list():
-        ret[endpoint.id] = {'id': endpoint.id,
-                            'region': endpoint.region,
-                            'adminurl': endpoint.adminurl,
-                            'internalurl': endpoint.internalurl,
-                            'publicurl': endpoint.publicurl,
-                            'service_id': endpoint.service_id}
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for hook in git.getprojecthooks(project.get('id')):
+        ret[hook.get('url')] = hook
     return ret
 
 
-def endpoint_create(service, publicurl=None, internalurl=None, adminurl=None,
-                    region=None, profile=None, **connection_args):
+def hook_create(hook_url, issues_events=False, merge_requests_events=False, \
+    push_events=False, project_id=None, project_name=None, **connection_args):
     '''
-    Create an endpoint for an Openstack service
+    Create an hook for a project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.endpoint_create nova 'http://public/url'
-            'http://internal/url' 'http://adminurl/url' region
+        salt '*' gitlab.hook_create 'https://hook.url/' push_events=True project_id=300
     '''
     git = auth(**connection_args)
-    gitlab_service = service_get(name=service, **connection_args)
-    if not gitlab_service or 'Error' in gitlab_service:
-        return {'Error': 'Could not find the specified service'}
-    git.endpoints.create(region=region,
-                            service_id=gitlab_service[service]['id'],
-                            publicurl=publicurl,
-                            adminurl=adminurl,
-                            internalurl=internalurl)
-    return endpoint_get(service, **connection_args)
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    create = True
+    for hook in git.getprojecthooks(project.get('id')):
+        if hook.get('url') == hook_url:
+            create = False
+    if create:  
+        git.addprojecthook(project['id'], hook_url)
+    return hook_get(hook_url, project_id=project['id'])
 
 
-def endpoint_delete(service, profile=None, **connection_args):
+def hook_delete(hook_url, project_id=None, project_name=None, **connection_args):
     '''
-    Delete endpoints of an Openstack service
+    Delete hook of a Gitlab project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.endpoint_delete nova
+        salt '*' gitlab.hook_delete 'https://hook.url/' project_id=300
     '''
     git = auth(**connection_args)
-    endpoint = endpoint_get(service, profile, **connection_args)
-    if not endpoint or 'Error' in endpoint:
-        return {'Error': 'Could not find any endpoints for the service'}
-    git.endpoints.delete(endpoint['id'])
-    endpoint = endpoint_get(service, profile, **connection_args)
-    if not endpoint or 'Error' in endpoint:
-        return True
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for hook in git.getprojecthooks(project.get('id')):
+        if hook.get('url') == hook_url:
+            return git.deleteprojecthook(project['id'], hook['id'])
+    return {'Error': 'Could not find hook for the specified project'}
 
 
-def role_create(name, profile=None, **connection_args):
-    '''
-    Create named role
-
-    .. code-block:: bash
-
-        salt '*' gitlab.role_create admin
-    '''
-
-    git = auth(**connection_args)
-    if 'Error' not in role_get(name=name, profile=profile, **connection_args):
-        return {'Error': 'Role "{0}" already exists'.format(name)}
-    role = git.roles.create(name)
-    return role_get(name=name, profile=profile, **connection_args)
-
-
-def role_delete(role_id=None, name=None, profile=None,
-                **connection_args):
-    '''
-    Delete a role (gitlab role-delete)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.role_delete c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.role_delete role_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.role_delete name=admin
-    '''
-    git = auth(**connection_args)
-
-    if name:
-        for role in git.roles.list():
-            if role.name == name:
-                role_id = role.id
-                break
-    if not role_id:
-        return {'Error': 'Unable to resolve role id'}
-    role = role_get(role_id, profile=profile, **connection_args)
-    git.roles.delete(role)
-    ret = 'Role ID {0} deleted'.format(role_id)
-    if name:
-        ret += ' ({0})'.format(name)
-    return ret
-
-
-def role_get(role_id=None, name=None, profile=None, **connection_args):
-    '''
-    Return a specific roles (gitlab role-get)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.role_get c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.role_get role_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.role_get name=nova
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    if name:
-        for role in git.roles.list():
-            if role.name == name:
-                role_id = role.id
-                break
-    if not role_id:
-        return {'Error': 'Unable to resolve role id'}
-    role = git.roles.get(role_id)
-    ret[role.name] = {'id': role.id,
-                      'name': role.name}
-    return ret
-
-
-def role_list(profile=None, **connection_args):
-    '''
-    Return a list of available roles (gitlab role-list)
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.role_list
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    for role in git.roles.list():
-        ret[role.name] = {'id': role.id,
-                          'name': role.name}
-    return ret
-
-
-def service_create(name, service_type, description=None, profile=None,
+def deploykey_create(name, service_type, description=None, profile=None,
                    **connection_args):
     '''
-    Add service to Keystone service catalog
+    Add deploy to Gitlab project
 
     CLI Examples:
 
@@ -393,148 +193,146 @@ def service_create(name, service_type, description=None, profile=None,
     return service_get(service.id, profile=profile, **connection_args)
 
 
-def service_delete(service_id=None, name=None, profile=None, **connection_args):
+def deploykey_delete(key_title, project_id=None, project_name=None, **connection_args):
     '''
-    Delete a service from Keystone service catalog
+    Delete a deploy key from Gitlab project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.service_delete c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.service_delete name=nova
-    '''
-    git = auth(profile)
-    if name:
-        service_id = service_get(name=name, profile=profile,
-                                 **connection_args)[name]['id']
-    service = git.services.delete(service_id)
-    return 'Keystone service ID "{0}" deleted'.format(service_id)
-
-
-def service_get(service_id=None, name=None, profile=None, **connection_args):
-    '''
-    Return a specific services (gitlab service-get)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.service_get c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.service_get service_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.service_get name=nova
+        salt '*' gitlab.deploykey_delete key.domain.com 12
+        salt '*' gitlab.deploykey_delete key.domain.com project_name=namespace/path
     '''
     git = auth(**connection_args)
-    ret = {}
-    if name:
-        for service in git.services.list():
-            if service.name == name:
-                service_id = service.id
-                break
-    if not service_id:
-        return {'Error': 'Unable to resolve service id'}
-    service = git.services.get(service_id)
-    ret[service.name] = {'id': service.id,
-                         'name': service.name,
-                         'type': service.type,
-                         'description': service.description}
-    return ret
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for key in git.listdeploykeys(project.get('id')):
+        if key.get('title') == key_title:
+            git.deletedeploykey(project['id'], key['id'])
+            return 'Gitlab deploy key ID "{0}" deleted'.format(key['id'])
+    return {'Error': 'Could not find deploy key for the specified project'}
 
-
-def service_list(profile=None, **connection_args):
+def deploykey_get(key_title, project_id=None, project_name=None, **connection_args):
     '''
-    Return a list of available services (gitlab services-list)
+    Return a specific deploy key
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.deploykey_get key.domain.com 12
+        salt '*' gitlab.deploykey_get key.domain.com project_name=namespace/path
+    '''
+    git = auth(**connection_args)
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for key in git.listdeploykeys(project.get('id')):
+        if key.get('title') == key_title:
+            return {key.get('title'): key}
+    return {'Error': 'Could not find deploy key for the specified project'}
+
+
+def deploykey_list(project_id=None, project_name=None, **connection_args):
+    '''
+    Return a list of available deploy keys for project
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' gitlab.service_list
+        salt '*' gitlab.deploykey_list 341
     '''
     git = auth(**connection_args)
     ret = {}
-    for service in git.services.list():
-        ret[service.name] = {'id': service.id,
-                             'name': service.name,
-                             'description': service.description,
-                             'type': service.type}
+    if project_name:
+        project = _get_project_by_name(git, project_name)
+    else:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Unable to resolve project'}
+    for key in git.listdeploykeys(project.get('id')):
+        ret[key.get('title')] = key
     return ret
 
-
-def tenant_create(name, description=None, enabled=True, profile=None,
+def project_create(name, description=None, enabled=True, profile=None,
                   **connection_args):
     '''
-    Create a gitlab tenant
+    Create a gitlab project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.tenant_create nova description='nova tenant'
-        salt '*' gitlab.tenant_create test enabled=False
+        salt '*' gitlab.project_create nova description='nova project'
+        salt '*' gitlab.project_create test enabled=False
     '''
     git = auth(**connection_args)
-    new = git.tenants.create(name, description, enabled)
-    return tenant_get(new.id, profile=profile, **connection_args)
+    new = git.projects.create(name, description, enabled)
+    return project_get(new.id, profile=profile, **connection_args)
 
 
-def tenant_delete(tenant_id=None, name=None, profile=None, **connection_args):
+def project_delete(project_id=None, name=None, profile=None, **connection_args):
     '''
-    Delete a tenant (gitlab tenant-delete)
+    Delete a project (gitlab project-delete)
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.tenant_delete c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.tenant_delete tenant_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.tenant_delete name=demo
+        salt '*' gitlab.project_delete c965f79c4f864eaaa9c3b41904e67082
+        salt '*' gitlab.project_delete project_id=c965f79c4f864eaaa9c3b41904e67082
+        salt '*' gitlab.project_delete name=demo
     '''
     git = auth(**connection_args)
     if name:
-        for tenant in git.tenants.list():
-            if tenant.name == name:
-                tenant_id = tenant.id
+        for project in git.projects.list():
+            if project.name == name:
+                project_id = project.id
                 break
-    if not tenant_id:
-        return {'Error': 'Unable to resolve tenant id'}
-    git.tenants.delete(tenant_id)
-    ret = 'Tenant ID {0} deleted'.format(tenant_id)
+    if not project_id:
+        return {'Error': 'Unable to resolve project id'}
+    git.projects.delete(project_id)
+    ret = 'Tenant ID {0} deleted'.format(project_id)
     if name:
 
         ret += ' ({0})'.format(name)
     return ret
 
 
-def tenant_get(tenant_id=None, name=None, profile=None,
-               **connection_args):
+def project_get(project_id=None, name=None, **connection_args):
     '''
-    Return a specific tenants (gitlab tenant-get)
+    Return a specific project
 
     CLI Examples:
 
     .. code-block:: bash
 
-        salt '*' gitlab.tenant_get c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.tenant_get tenant_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.tenant_get name=nova
+        salt '*' gitlab.project_get 323
+        salt '*' gitlab.project_get project_id=323
+        salt '*' gitlab.project_get name=namespace/repository
     '''
     git = auth(**connection_args)
     ret = {}
-    if name:
-        for tenant in git.tenants.list():
-            if tenant.name == name:
-                tenant_id = tenant.id
-                break
-    if not tenant_id:
-        return {'Error': 'Unable to resolve tenant id'}
-    tenant = git.tenants.get(tenant_id)
-    ret[tenant.name] = {'id': tenant.id,
-                        'name': tenant.name,
-                        'description': tenant.description,
-                        'enabled': tenant.enabled}
-    return ret
 
+    if name:
+        project = _get_project_by_name(git, name)
+    else:
+        project = _get_project_by_id(git, project_id)
+
+    if not project:
+        return {'Error': 'Error in retrieving project'}
+
+    ret[project.get('name')] = project
+    return ret
 
 def project_list(**connection_args):
     '''
@@ -549,14 +347,14 @@ def project_list(**connection_args):
     git = auth(**connection_args)
     ret = {}
     for project in git.getprojects():
-        ret[project.name] = project
+        ret[project.get('name')] = project
     return ret
 
 
 def project_update(project_id=None, name=None, email=None,
                   enabled=None, **connection_args):
     '''
-    Update a tenant's information (gitlab tenant-update)
+    Update a project's information (gitlab project-update)
     The following fields may be updated: name, email, enabled.
     Can only update name if targeting by ID
 
@@ -564,414 +362,23 @@ def project_update(project_id=None, name=None, email=None,
 
     .. code-block:: bash
 
-        salt '*' gitlab.tenant_update name=admin enabled=True
-        salt '*' gitlab.tenant_update c965f79c4f864eaaa9c3b41904e67082 name=admin email=admin@domain.com
+        salt '*' gitlab.project_update name=admin enabled=True
+        salt '*' gitlab.project_update c965f79c4f864eaaa9c3b41904e67082 name=admin email=admin@domain.com
     '''
     git = auth(**connection_args)
-    if not tenant_id:
-        for tenant in git.tenants.list():
-            if tenant.name == name:
-                tenant_id = tenant.id
+    if not project_id:
+        for project in git.projects.list():
+            if project.name == name:
+                project_id = project.id
                 break
-    if not tenant_id:
-        return {'Error': 'Unable to resolve tenant id'}
+    if not project_id:
+        return {'Error': 'Unable to resolve project id'}
 
-    tenant = git.tenants.get(tenant_id)
+    project = git.projects.get(project_id)
     if not name:
-        name = tenant.name
+        name = project.name
     if not email:
-        email = tenant.email
+        email = project.email
     if enabled is None:
-        enabled = tenant.enabled
-    git.tenants.update(tenant_id, name, email, enabled)
-
-
-def token_get(profile=None, **connection_args):
-    '''
-    Return the configured tokens (gitlab token-get)
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.token_get c965f79c4f864eaaa9c3b41904e67082
-    '''
-    git = auth(**connection_args)
-    token = git.service_catalog.get_token()
-    return {'id': token['id'],
-            'expires': token['expires'],
-            'user_id': token['user_id'],
-            'tenant_id': token['tenant_id']}
-
-
-def user_list(profile=None, **connection_args):
-    '''
-    Return a list of available users (gitlab user-list)
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_list
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    for user in git.users.list():
-        ret[user.name] = {'id': user.id,
-                          'name': user.name,
-                          'email': user.email,
-                          'enabled': user.enabled}
-        tenant_id = getattr(user, 'tenantId', None)
-        if tenant_id:
-            ret[user.name]['tenant_id'] = tenant_id
-    return ret
-
-
-def user_get(user_id=None, name=None, profile=None, **connection_args):
-    '''
-    Return a specific users (gitlab user-get)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_get c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.user_get user_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.user_get name=nova
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    if name:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-    user = git.users.get(user_id)
-    ret[user.name] = {'id': user.id,
-                      'name': user.name,
-                      'email': user.email,
-                      'enabled': user.enabled}
-    tenant_id = getattr(user, 'tenantId', None)
-    if tenant_id:
-        ret[user.name]['tenant_id'] = tenant_id
-    return ret
-
-
-def user_create(name, password, email, tenant_id=None,
-                enabled=True, profile=None, **connection_args):
-    '''
-    Create a user (gitlab user-create)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_create name=jack password=zero email=jack@halloweentown.org tenant_id=a28a7b5a999a455f84b1f5210264375e enabled=True
-    '''
-    git = auth(**connection_args)
-    item = git.users.create(name=name,
-                               password=password,
-                               email=email,
-                               tenant_id=tenant_id,
-                               enabled=enabled)
-    return user_get(item.id, profile=profile, **connection_args)
-
-
-def user_delete(user_id=None, name=None, profile=None, **connection_args):
-    '''
-    Delete a user (gitlab user-delete)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_delete c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.user_delete user_id=c965f79c4f864eaaa9c3b41904e67082
-        salt '*' gitlab.user_delete name=nova
-    '''
-    git = auth(**connection_args)
-    if name:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-    git.users.delete(user_id)
-    ret = 'User ID {0} deleted'.format(user_id)
-    if name:
-
-        ret += ' ({0})'.format(name)
-    return ret
-
-
-def user_update(user_id=None, name=None, email=None, enabled=None,
-                tenant=None, profile=None, **connection_args):
-    '''
-    Update a user's information (gitlab user-update)
-    The following fields may be updated: name, email, enabled, tenant.
-    Because the name is one of the fields, a valid user id is required.
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_update user_id=c965f79c4f864eaaa9c3b41904e67082 name=newname
-        salt '*' gitlab.user_update c965f79c4f864eaaa9c3b41904e67082 name=newname email=newemail@domain.com
-    '''
-    git = auth(**connection_args)
-    if not user_id:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-        if not user_id:
-            return {'Error': 'Unable to resolve user id'}
-    user = git.users.get(user_id)
-    # Keep previous settings if not updating them
-    if not name:
-        name = user.name
-    if not email:
-        email = user.email
-    if enabled is None:
-        enabled = user.enabled
-    git.users.update(user=user_id, name=name, email=email, enabled=enabled)
-    if tenant:
-        for t in git.tenants.list():
-            if t.name == tenant:
-                tenant_id = t.id
-                break
-        git.users.update_tenant(user_id, tenant_id)
-    ret = 'Info updated for user ID {0}'.format(user_id)
-    return ret
-
-
-def user_verify_password(user_id=None, name=None, password=None,
-                         profile=None, **connection_args):
-    '''
-    Verify a user's password
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_verify_password name=test password=foobar
-        salt '*' gitlab.user_verify_password user_id=c965f79c4f864eaaa9c3b41904e67082 password=foobar
-    '''
-    git = auth(**connection_args)
-    if 'connection_endpoint' in connection_args:
-        auth_url = connection_args.get('connection_endpoint')
-    else:
-        auth_url = __salt__['config.option']('gitlab.endpoint',
-                                         'http://127.0.0.1:35357/v2.0')
-
-    if user_id:
-        for user in git.users.list():
-            if user.id == user_id:
-                name = user.name
-                break
-    if not name:
-        return {'Error': 'Unable to resolve user name'}
-    kwargs = {'username': name,
-              'password': password,
-              'auth_url': auth_url}
-    try:
-        userauth = client.Client(**kwargs)
-    except gitlabclient.exceptions.Unauthorized:
-        return False
-    return True
-
-
-def user_password_update(user_id=None, name=None, password=None,
-                         profile=None, **connection_args):
-    '''
-    Update a user's password (gitlab user-password-update)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_delete c965f79c4f864eaaa9c3b41904e67082 password=12345
-        salt '*' gitlab.user_delete user_id=c965f79c4f864eaaa9c3b41904e67082 password=12345
-        salt '*' gitlab.user_delete name=nova password=12345
-    '''
-    git = auth(**connection_args)
-    if name:
-        for user in git.users.list():
-            if user.name == name:
-                user_id = user.id
-                break
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-    git.users.update_password(user=user_id, password=password)
-    ret = 'Password updated for user ID {0}'.format(user_id)
-    if name:
-        ret += ' ({0})'.format(name)
-    return ret
-
-
-def user_role_add(user_id=None, user=None, tenant_id=None,
-                  tenant=None, role_id=None, role=None, profile=None,
-                  **connection_args):
-    '''
-    Add role for user in tenant (gitlab user-role-add)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_role_add \
-            user_id=298ce377245c4ec9b70e1c639c89e654 \
-            tenant_id=7167a092ece84bae8cead4bf9d15bb3b \
-            role_id=ce377245c4ec9b70e1c639c89e8cead4
-        salt '*' gitlab.user_role_add user=admin tenant=admin role=admin
-    '''
-    git = auth(**connection_args)
-    if user:
-        user_id = user_get(name=user, profile=profile,
-                           **connection_args)[user]['id']
-    else:
-        user = user_get(user_id, profile=profile,
-                        **connection_args).keys()[0]['name']
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-
-    if tenant:
-        tenant_id = tenant_get(name=tenant, profile=profile,
-                               **connection_args)[tenant]['id']
-    else:
-        tenant = tenant_get(tenant_id, profile=profile,
-                            **connection_args).keys()[0]['name']
-    if not tenant_id:
-        return {'Error': 'Unable to resolve tenant id'}
-
-    if role:
-        role_id = role_get(name=role, profile=profile,
-                           **connection_args)[role]['id']
-    else:
-        role = role_get(role_id, profile=profile,
-                        **connection_args).keys()[0]['name']
-    if not role_id:
-        return {'Error': 'Unable to resolve role id'}
-
-    git.roles.add_user_role(user_id, role_id, tenant_id)
-    ret_msg = '"{0}" role added for user "{1}" for "{2}" tenant'
-    return ret_msg.format(role, user, tenant)
-
-
-def user_role_remove(user_id=None, user=None, tenant_id=None,
-                     tenant=None, role_id=None, role=None,
-                     profile=None, **connection_args):
-    '''
-    Remove role for user in tenant (gitlab user-role-remove)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_role_remove \
-            user_id=298ce377245c4ec9b70e1c639c89e654 \
-            tenant_id=7167a092ece84bae8cead4bf9d15bb3b \
-            role_id=ce377245c4ec9b70e1c639c89e8cead4
-        salt '*' gitlab.user_role_remove user=admin tenant=admin role=admin
-    '''
-    git = auth(**connection_args)
-    if user:
-        user_id = user_get(name=user, profile=profile,
-                           **connection_args)[user]['id']
-    else:
-        user = user_get(user_id, profile=profile,
-                        **connection_args).keys()[0]['name']
-    if not user_id:
-        return {'Error': 'Unable to resolve user id'}
-
-    if tenant:
-        tenant_id = tenant_get(name=tenant, profile=profile,
-                               **connection_args)[tenant]['id']
-    else:
-        tenant = tenant_get(tenant_id, profile=profile,
-                            **connection_args).keys()[0]['name']
-    if not tenant_id:
-        return {'Error': 'Unable to resolve tenant id'}
-
-    if role:
-        role_id = role_get(name=role, profile=profile,
-                           **connection_args)[role]['id']
-    else:
-        role = role_get(role_id).keys()[0]['name']
-    if not role_id:
-        return {'Error': 'Unable to resolve role id'}
-
-    git.roles.remove_user_role(user_id, role_id, tenant_id)
-    ret_msg = '"{0}" role removed for user "{1}" under "{2}" tenant'
-    return ret_msg.format(role, user, tenant)
-
-
-def user_role_list(user_id=None, tenant_id=None, user_name=None,
-                   tenant_name=None, profile=None, **connection_args):
-    '''
-    Return a list of available user_roles (gitlab user-roles-list)
-
-    CLI Examples:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.user_role_list \
-            user_id=298ce377245c4ec9b70e1c639c89e654 \
-            tenant_id=7167a092ece84bae8cead4bf9d15bb3b
-        salt '*' gitlab.user_role_list user_name=admin tenant_name=admin
-    '''
-    git = auth(**connection_args)
-    ret = {}
-    if user_name:
-        for user in git.users.list():
-            if user.name == user_name:
-                user_id = user.id
-                break
-    if tenant_name:
-        for tenant in git.tenants.list():
-            if tenant.name == tenant_name:
-                tenant_id = tenant.id
-                break
-    if not user_id or not tenant_id:
-        return {'Error': 'Unable to resolve user or tenant id'}
-    for role in git.roles.roles_for_user(user=user_id, tenant=tenant_id):
-        ret[role.name] = {'id': role.id,
-                          'name': role.name,
-                          'user_id': user_id,
-                          'tenant_id': tenant_id}
-    return ret
-
-
-def _item_list(profile=None, **connection_args):
-    '''
-    Template for writing list functions
-    Return a list of available items (gitlab items-list)
-
-    CLI Example:
-
-    .. code-block:: bash
-
-        salt '*' gitlab.item_list
-    '''
-    git = auth(**connection_args)
-    ret = []
-    for item in git.items.list():
-        ret.append(item.__dict__)
-        #ret[item.name] = {
-        #        'id': item.id,
-        #        'name': item.name,
-        #        }
-    return ret
-
-    #The following is a list of functions that need to be incorporated in the
-    #gitlab module. This list should be updated as functions are added.
-    #
-    #endpoint-create     Create a new endpoint associated with a service
-    #endpoint-delete     Delete a service endpoint
-    #discover            Discover Keystone servers and show authentication
-    #                    protocols and
-    #bootstrap           Grants a new role to a new user on a new tenant, after
-    #                    creating each.
+        enabled = project.enabled
+    git.projects.update(project_id, name, email, enabled)
