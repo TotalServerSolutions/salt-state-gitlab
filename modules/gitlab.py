@@ -73,10 +73,10 @@ def auth(**connection_args):
     token = get('token')
     url = get('url', 'https://localhost/')
     if token:
-        git = Gitlab(url, token=token)
+        git = Gitlab(url, token=token, verify_ssl=False)
     else:
         git = Gitlab(url)
-        git.login(user, password)
+        git.login(user, password, verify_ssl=False)
     return git
 
 
