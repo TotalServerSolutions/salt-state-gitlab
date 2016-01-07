@@ -221,7 +221,7 @@ def deploykey_delete(key_title, project_id=None, project_name=None, **connection
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.listdeploykeys(project.get('id')):
+    for key in git.getdeploykeys(project.get('id')):
         if key.get('title') == key_title:
             git.deletedeploykey(project['id'], key['id'])
             return 'Gitlab deploy key ID "{0}" deleted'.format(key['id'])
@@ -270,7 +270,7 @@ def deploykey_list(project_id=None, project_name=None, **connection_args):
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.listdeploykeys(project.get('id')):
+    for key in git.getdeploykeys(project.get('id')):
         ret[key.get('title')] = key
     return ret
 
