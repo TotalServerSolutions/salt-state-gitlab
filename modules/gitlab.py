@@ -126,8 +126,8 @@ def hook_list(project_id=None, project_name=None, **connection_args):
     return ret
 
 
-def hook_create(hook_url, issues_events=False, merge_requests_events=False, \
-    push_events=False, project_id=None, project_name=None, **connection_args):
+def hook_create(hook_url, issues=False, merge_requests=False, \
+    push=False, tag_push=False, project_id=None, project_name=None, **connection_args):
     '''
     Create an hook for a project
 
@@ -149,7 +149,8 @@ def hook_create(hook_url, issues_events=False, merge_requests_events=False, \
         if hook.get('url') == hook_url:
             create = False
     if create:  
-        git.addprojecthook(project['id'], hook_url)
+        git.addprojecthook(project['id'], hook_url, issues=issues, 
+            push=push, merge_requests=merge_requests, tag_push=tag_push)
     return hook_get(hook_url, project_id=project['id'])
 
 
@@ -221,7 +222,7 @@ def deploykey_delete(key_title, project_id=None, project_name=None, **connection
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.getdeploykeys(project.get('id')):
+    for key in git.listdeploykeys(project.get('id')):
         if key.get('title') == key_title:
             git.deletedeploykey(project['id'], key['id'])
             return 'Gitlab deploy key ID "{0}" deleted'.format(key['id'])
@@ -270,7 +271,7 @@ def deploykey_list(project_id=None, project_name=None, **connection_args):
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.getdeploykeys(project.get('id')):
+    for key in git.listdeploykeys(project.get('id')):
         ret[key.get('title')] = key
     return ret
 
@@ -394,3 +395,4 @@ def project_update(project_id=None, name=None, email=None,
     if enabled is None:
         enabled = project.enabled
     git.projects.update(project_id, name, email, enabled)
+
