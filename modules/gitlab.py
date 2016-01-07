@@ -287,8 +287,8 @@ def project_create(name, description=None, enabled=True, profile=None,
         salt '*' gitlab.project_create test enabled=False
     '''
     git = auth(**connection_args)
-    new = git.projects.create(name, description, enabled)
-    return project_get(new.id, profile=profile, **connection_args)
+    data = git.createproject(name, description=description, enabled=True, profile=profile)
+    return project_get(data['id'], profile=profile, **connection_args)
 
 
 def project_delete(project_id=None, name=None, profile=None, **connection_args):
@@ -390,3 +390,4 @@ def project_update(project_id=None, name=None, email=None,
     if enabled is None:
         enabled = project.enabled
     git.projects.update(project_id, name, email, enabled)
+
