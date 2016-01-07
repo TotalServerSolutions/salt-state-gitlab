@@ -195,7 +195,7 @@ def deploykey_create(title, key, project_id=None, project_name=None,
     if not project:
         return {'Error': 'Unable to resolve project'}
     create = True
-    for dkey in git.listdeploykeys(project['id']):
+    for dkey in git.getdeploykeys(project['id']):
         if dkey.get('title') == title:
             create = False
     if create:
@@ -246,7 +246,7 @@ def deploykey_get(title, project_id=None, project_name=None, **connection_args):
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.listdeploykeys(project.get('id')):
+    for key in git.getdeploykeys(project.get('id')):
         if key.get('title') == title:
             return {key.get('title'): key}
     return {'Error': 'Could not find deploy key for the specified project'}
@@ -287,7 +287,11 @@ def project_create(name, description=None, enabled=True, profile=None,
         salt '*' gitlab.project_create test enabled=False
     '''
     git = auth(**connection_args)
+    print vars(git)
+    #new = git.projects.create(name, description, enabled)
     data = git.createproject(name, description=description, enabled=True, profile=profile)
+    if not data:
+        return {'Error': 'Unable to create project'}
     return project_get(data['id'], profile=profile, **connection_args)
 
 
@@ -390,4 +394,3 @@ def project_update(project_id=None, name=None, email=None,
     if enabled is None:
         enabled = project.enabled
     git.projects.update(project_id, name, email, enabled)
-
