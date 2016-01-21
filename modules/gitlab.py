@@ -288,8 +288,6 @@ def project_create(name, description=None, enabled=True, profile=None,
         salt '*' gitlab.project_create test enabled=False
     '''
     git = auth(**connection_args)
-    print vars(git)
-    #new = git.projects.create(name, description, enabled)
     data = git.createproject(name, description=description, enabled=True, profile=profile)
     if not data:
         return {'Error': 'Unable to create project'}
@@ -396,3 +394,119 @@ def project_update(project_id=None, name=None, email=None,
         enabled = project.enabled
     git.projects.update(project_id, name, email, enabled)
 
+def user_list(**connection_args):
+    '''
+    Return a list of available users
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_list
+    '''
+    git = auth(**connection_args)
+    ret = {}
+    for user in git.getusers():
+        ret[user.get('name')] = user
+    return ret
+
+def _get_user_by_name(git, name):
+    selected_user = None
+    for user in git.getusers():
+        if user.get('username') == name:
+            selected_user = user
+            break
+    return user
+
+def _get_user_by_id(git, id):
+    selected_user = git.getuser(id)
+    return selected_user
+
+def user_get(user_id=None, name=None, **connection_args):
+    '''
+    Return a specific user
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_get 11
+        salt '*' gitlab.user_get user_id=11
+        salt '*' gitlab.user_get name=kevinquinnyo
+    '''
+    git = auth(**connection_args)
+    ret = {}
+    if name:
+        user = _get_user_by_name(git, name)
+    else:
+        user = _get_user_by_id(git, user_id)
+    if not user:
+        return {'Error': 'Error in retrieving user'}
+    ret[user.get('name')] = user
+    return ret
+
+def user_list(**connection_args):
+    '''
+    Return a list of available users
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_list
+    '''
+    git = auth(**connection_args)
+    ret = {}
+    for user in git.getusers():
+        ret[user.get('name')] = user
+    return ret
+
+def user_create(name,
+                username,
+                password,
+                email,
+                **connection_args):
+    '''
+    Create a gitlab user
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_create 'Kevin Quinn' kevinquinnyo 'p4ssw0rd' kevin@example.com admin=True
+    '''
+
+    if 'can_create_group' not in  connection_args:
+        connection_args['can_create_group'] = False
+    git = auth(**connection_args)
+    print connection_args
+    data = git.createuser(name,
+                        username,
+                        password,
+                        email,
+                        **connection_args)
+    if not data:
+        return {'Error': 'Unable to create user'}
+    return user_get(data['id'], **connection_args)
+
+def user_delete(user_id=None, username=None, **connection_args):
+    '''
+    Delete a user
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_delete username=kevinquinnyo
+        salt '*' gitlab.user_delete 11
+    '''
+    git = auth(**connection_args)
+    if username:
+        user = _get_user_by_name(git, username)
+    else:
+        user = _get_user_by_id(git, user_id)
+    if not user:
+        return {'Error': 'Unable to find user with user_id {0} and username {1}'.format(user_id, username)}
+    ret = git.deleteuser(user['id'])
+    if ret.response == 
+    return {'Error': 'Unable to delete user {0} (username: {1})'.format(user['id'], user['username'])}
