@@ -410,19 +410,19 @@ def user_list(**connection_args):
         ret[user.get('name')] = user
     return ret
 
-def _get_user_by_name(git, name):
+def _get_user_by_name(git, username):
     selected_user = None
     for user in git.getusers():
-        if user.get('username') == name:
+        if user.get('username') == username:
             selected_user = user
             break
-    return user
+    return selected_user
 
 def _get_user_by_id(git, id):
     selected_user = git.getuser(id)
     return selected_user
 
-def user_get(user_id=None, name=None, **connection_args):
+def user_get(user_id=None, username=None, **connection_args):
     '''
     Return a specific user
 
@@ -432,17 +432,17 @@ def user_get(user_id=None, name=None, **connection_args):
 
         salt '*' gitlab.user_get 11
         salt '*' gitlab.user_get user_id=11
-        salt '*' gitlab.user_get name=kevinquinnyo
+        salt '*' gitlab.user_get username=kevinquinnyo
     '''
     git = auth(**connection_args)
     ret = {}
-    if name:
-        user = _get_user_by_name(git, name)
+    if username:
+        user = _get_user_by_name(git, username)
     else:
         user = _get_user_by_id(git, user_id)
     if not user:
         return {'Error': 'Error in retrieving user'}
-    ret[user.get('name')] = user
+    ret[user.get('username')] = user
     return ret
 
 def user_list(**connection_args):
@@ -479,7 +479,6 @@ def user_create(name,
     if 'can_create_group' not in  connection_args:
         connection_args['can_create_group'] = False
     git = auth(**connection_args)
-    print connection_args
     data = git.createuser(name,
                         username,
                         password,
@@ -489,7 +488,7 @@ def user_create(name,
         return {'Error': 'Unable to create user'}
     return user_get(data['id'], **connection_args)
 
-def user_delete(user_id=None, username=None, **connection_args):
+def user_delete(user_id=None, **connection_args):
     '''
     Delete a user
 
@@ -501,12 +500,48 @@ def user_delete(user_id=None, username=None, **connection_args):
         salt '*' gitlab.user_delete 11
     '''
     git = auth(**connection_args)
-    if username:
-        user = _get_user_by_name(git, username)
-    else:
-        user = _get_user_by_id(git, user_id)
+    user = _get_user_by_id(git, user_id)
     if not user:
-        return {'Error': 'Unable to find user with user_id {0} and username {1}'.format(user_id, username)}
-    ret = git.deleteuser(user['id'])
-    if ret.response == 
+        return {'Error': 'Unable to find user with user_id {0}'.format(user_id)}
+    deleted = git.deleteuser(user_id)
+    if deleted:
+        return {'user_id': user['id'], 'user_name': user['name'], 'deleted': True}
     return {'Error': 'Unable to delete user {0} (username: {1})'.format(user['id'], user['username'])}
+
+def user_update(user_id=None,
+                    name=None,
+                    username=None,
+                    password=None,
+                    email=None,
+                    **connection_args):
+    '''
+    Update a user's information (gitlab user-update)
+    The following fields may be updated: name, email, username, password.
+    Can only update name if targeting by ID
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.user_update name=admin enabled=True
+        salt '*' gitlab.user_update 11 name=admin email=admin@domain.com
+    '''
+    git = auth(**connection_args)
+    if not user_id:
+        user = _get_user_by_name(username)
+        user_id = user['id']
+    if not user_id:
+        return {'Error': 'Unable to resolve user id'}
+    user = git.getuser(user_id)
+    if not name:
+        name = user['name']
+    if not username:
+        username = user['username']
+    if not email:
+        email = user['email']
+    if password:
+        user_edited = git.edituser(user_id, name=name, username=username, email=email, password=password)
+    else: 
+        user_edited = git.edituser(user_id, name=name, username=username, email=email)
+    return user_edited
+
