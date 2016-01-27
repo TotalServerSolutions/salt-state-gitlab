@@ -55,7 +55,7 @@ def project_present(name, description=None, enabled=True, profile=None,
            'result': True,
            'comment': 'Tenant "{0}" already exists'.format(name)}
 
-    # Check if user is already present
+    # Check if project is already present
     project = __salt__['gitlab.project_get'](name=name,
                                              profile=profile,
                                              **connection_args)
@@ -207,3 +207,60 @@ def hook_present(name, project, **connection_args):
         ret['comment'] = 'Hook "{0}" has been added'.format(name)
         ret['changes']['Hook'] = 'Created'
     return ret
+
+## user present
+def user_present(username, name, email, password, **connection_args):
+    ''''
+    Ensures that the gitlab user exists
+
+    username
+        The username of the user to manage
+    
+    name
+        The name of the user to manage
+
+    password
+        The password of the user to manage
+
+    email
+        The email of the user to manage
+    '''
+    ret = {'name': name,
+           'changes': {},
+           'result': True,
+           'comment': 'User "{0}" already exists'.format(name)}
+
+    # Check if user is already present
+    user = __salt__['gitlab.user_get'](username=username, **connection_args)
+
+    if 'Error' not in user:
+        key = username
+        if user[key]['username'] != username:
+            ret['changes']['Username'] = 'Now {0}'.format(username)
+        if user[key]['email'] != email:
+            ret['changes']['Email'] = 'Now {0}'.format(email)
+        if user[key]['name'] != name:
+            ret['changes']['Name'] = 'Now {0}'.format(name)
+        # don't know if there's a way to retreive password hash
+        # just go ahead and update it
+        if password:
+            ret['changes']['Password'] = 'Now {0}'.format(password)
+
+        update = __salt__['gitlab.user_update'](user_id=user[key]['id'],
+                                            name=name,
+                                            username=username,
+                                            password=password,
+                                            email='foo@bar.com',
+                                            **connection_args)
+        comment = 'User "{0}" has been updated and debug email {1}'.format(name, email)
+        ret['comment'] = comment
+    else:
+        # Create user
+        __salt__['gitlab.user_create'](name, username,
+                                            password,
+                                            email,
+                                            **connection_args)
+        ret['comment'] = 'User "{0}" has been added'.format(name)
+        ret['changes']['User'] = 'Created'
+    return ret
+
