@@ -47,6 +47,8 @@ def _get_project_by_id(git, id):
 
 def _get_project_by_name(git, name):
     selected_project = None
+    if name.startswith('/'):
+        name = name[1:]
     for project in git.getprojects():
         if project.get('path_with_namespace') == name:
             selected_project = project
@@ -271,7 +273,7 @@ def deploykey_list(project_id=None, project_name=None, **connection_args):
         project = _get_project_by_id(git, project_id)
     if not project:
         return {'Error': 'Unable to resolve project'}
-    for key in git.listdeploykeys(project.get('id')):
+    for key in git.getdeploykeys(project.get('id')):
         ret[key.get('title')] = key
     return ret
 
@@ -544,4 +546,54 @@ def user_update(user_id=None,
     else: 
         user_edited = git.edituser(user_id, name=name, username=username, email=email)
     return user_edited
+    
+def branch_create(project,
+                branch_name,
+                ref,
+                **connection_args):
+    '''
+    Create a gitlab branch
 
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.branch_create my_project staging
+    '''
+
+    git = auth(**connection_args)
+    
+    project = _get_project_by_name(git, project)
+    if not project:
+        return {'Error': 'Error in retrieving project'}
+    data = git.createbranch(project['id'],
+                        branch=branch_name,
+                        ref=ref)
+    if not data:
+        return {'Error': 'Unable to create branch {0}'.format(branch_name)}
+    return branch_get(data['name'], project_id=project['id'])
+
+def branch_get(branch_name, project=None, project_id=None, **connection_args):
+    '''
+    Return a specific branch
+
+    CLI Examples:
+
+    .. code-block:: bash
+
+        salt '*' gitlab.branch_get 11
+        salt '*' gitlab.user_get master my_project
+    '''
+    git = auth(**connection_args)
+    ret = {}
+    project = _get_project_by_name(git, project)
+    if not project:
+        project = _get_project_by_id(git, project_id)
+    if not project:
+        return {'Error': 'Error in retrieving project'}
+    data = git.getbranch(project['id'],
+                        branch_name)
+    if not data:
+        return {'Error': 'Unable to locate branch {0}'.format(branch_name)}
+    ret[branch_name] = data
+    return ret
