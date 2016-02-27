@@ -136,6 +136,11 @@ def deploykey_present(name, key, project, **connection_args):
     dkey = __salt__['gitlab.deploykey_get'](name,
                                            project_name=project,
                                            **connection_args)
+    if key.startswith('/'):
+        keyfile = key
+        with file(keyfile) as f:
+            key = f.read()
+        f.close()
 
     if 'Error' not in dkey:
         return ret
@@ -264,3 +269,31 @@ def user_present(username, name, email, password, **connection_args):
         ret['changes']['User'] = 'Created'
     return ret
 
+def branch_present(project, name, ref, **connection_args):
+    '''
+    Ensure branch present in Gitlab project
+
+    name
+        The name of the branch
+
+    project
+        path to project, i.e. namespace/repo-name
+
+    '''
+    ret = {'name': name,
+           'changes': {},
+           'result': True,
+           'comment': 'Branch "{0}" already exists in project {1}'.format(name, project)}
+
+    # Check if branch is already present
+    branch = __salt__['gitlab.branch_get'](name, project, **connection_args)
+
+    print "___DEBUG___ branch is {0}".format(branch)
+    if 'Error' not in branch:
+        return ret
+    else:
+        # Create branch
+        branch = __salt__['gitlab.branch_create'](project,  name, ref, **connection_args)
+        ret['comment'] = 'Branch "{0}" has been added'.format(name)
+        ret['changes']['Branch'] = 'Created'
+    return ret
